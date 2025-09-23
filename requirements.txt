@@ -43,3 +43,7 @@ ipyleaflet
 # Python: plotting libraries (optional)
 plotly>=6,<7
 bqplot
+
+
+polars>=1.33
+networkx>=3.4
