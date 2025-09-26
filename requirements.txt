@@ -46,4 +46,4 @@ bqplot
 
 
 polars>=1.33
-networkx>=3.4
+networkx[default]>=3,<4
