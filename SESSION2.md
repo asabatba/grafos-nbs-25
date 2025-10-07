@@ -1,260 +1,157 @@
+# Sesión práctica de 1 hora: Grafo de dependencias de trabajos en Neo4j
 
-# 📘 1-Hour Practical Class: Job Dependency Graph in Neo4j
+## Agenda
 
-## ⏱️ Agenda
+### 0. Introducción (5 min)
 
-### **0. Intro (5 min)**
-
----
-
-### **1. Exploring Dependencies (10 min)**
-
-* List all jobs:
-
-  ```cypher
-  MATCH (j:Job) RETURN j;
-  ```
-
-* Direct dependencies:
-
-  ```cypher
-  MATCH (j:Job {name:"AquaEvershire"})-[d:DEPENDS_ON]->(dep) RETURN j,d,dep;
-  ```
-
-* Full chain:
-
-  ```cypher
-  MATCH path=(j:Job {name:"AquaEvershire"})-[:DEPENDS_ON*]->(dep)
-  RETURN path;
-  ```
-
-```cypher
-MATCH path=(j:Job {name:"AquaEvershire"})-[:DEPENDS_ON*2]-(dep)
-  RETURN path;
-```
-
-Ejercicios.
-
-* Que busquen qué jobs dependen de este en concreto
-* Que limiten el número
+* Presentar el conjunto de datos de trabajos y dependencias que vamos a cargar en Neo4j.
+* Explicar el objetivo de la sesión: practicar consultas en **Cypher** para analizar ordenaciones, rutas críticas y problemas típicos de planificación.
 
 ---
 
-### **2. Finding Start Jobs & Execution Order (15 min)**
+### 1. Explorar las dependencias (10 min)
 
-* Jobs with **no dependencies** (can run first):
+* Recordar cómo está estructurado el grafo: tenemos nodos `Job` y relaciones `DEPENDS_ON` que van desde un trabajo hacia aquellos que deben ejecutarse antes.
 
-  ```cypher
-  MATCH (j:Job) WHERE NOT (j)-[:DEPENDS_ON]->() RETURN j;
-  ```
-
-¿Cuántos jobs no tienen dependencias?
+* Listar todos los trabajos disponibles para verificar que la carga de datos se hizo correctamente:
 
   ```cypher
-  MATCH (j:Job) WHERE NOT (j)-[:DEPENDS_ON]->() RETURN count(1) as c;
+  MATCH (j:Job)
+  RETURN j;
   ```
 
-* Jobs with **no dependents** (end jobs):
+  > Devuelve cada nodo `Job` con todas sus propiedades.
+
+* Consultar las dependencias directas de un trabajo específico (por ejemplo, `AquaEvershire`):
 
   ```cypher
-  MATCH (j:Job) WHERE NOT ()-[:DEPENDS_ON]->(j) RETURN j;
+  MATCH (j:Job {name: "AquaEvershire"})-[:DEPENDS_ON]->(dep)
+  RETURN j, dep;
   ```
 
-¿Cuántos jobs no tienen dependientes (jobs "finales")?
+  > Muestra qué trabajos deben completarse justo antes de `AquaEvershire`.
+
+* Revisar toda la cadena de dependencias hacia atrás (predecesores):
 
   ```cypher
-  MATCH (j:Job) WHERE NOT ()-[:DEPENDS_ON]->(j) RETURN count(1) as c;
+  MATCH path=(j:Job {name: "AquaEvershire"})-[:DEPENDS_ON*]->(dep)
+  RETURN path;
   ```
 
-* Approximate ordering by dependency count (dependencias directas):
+  > Devuelve todas las rutas en las que `AquaEvershire` depende indirectamente de otros trabajos.
+
+* **Ejercicio guiado:** pedirles que encuentren qué trabajos dependen de `AquaEvershire` (hacia adelante) y que limiten la profundidad de la ruta con `*1..3` para comparar los resultados.
+
+---
+
+### 2. Identificar trabajos iniciales y orden aproximado (12 min)
+
+* Localizar los trabajos sin dependencias de entrada, que son candidatos para ejecutarse primero:
+
+  ```cypher
+  MATCH (j:Job)
+  WHERE NOT (j)-[:DEPENDS_ON]->()
+  RETURN j.name;
+  ```
+
+  > Devuelve los trabajos raíz: aquellos que no dependen de ningún otro.
+
+* Contar cuántos trabajos podemos lanzar desde el inicio:
+
+  ```cypher
+  MATCH (j:Job)
+  WHERE NOT (j)-[:DEPENDS_ON]->()
+  RETURN count(*) AS trabajos_iniciales;
+  ```
+
+  > Nos da una idea del paralelismo potencial en la primera ronda.
+
+* Encontrar los trabajos finales (de los que nadie depende) para entender cuáles son los posibles puntos de entrega:
+
+  ```cypher
+  MATCH (j:Job)
+  WHERE NOT ()-[:DEPENDS_ON]->(j)
+  RETURN j.name;
+  ```
+
+* Obtener un orden aproximado ordenando por número de dependencias directas:
 
   ```cypher
   MATCH (j:Job)
   OPTIONAL MATCH (j)-[:DEPENDS_ON]->(dep)
-  WITH j, count(dep) AS deps
-  ORDER BY deps desc
-  RETURN j.name, deps;
+  WITH j, count(dep) AS dependencias_directas
+  RETURN j.name, dependencias_directas
+  ORDER BY dependencias_directas DESC;
   ```
-
-👉 Ask participants: *Does this look like a valid order? Why/why not?*
-(Emphasize that Cypher isn’t a scheduler but can help explore.)
-
-Cuantas dependencias en total
-
-```cypher
-MATCH (j:Job)
-  OPTIONAL MATCH (j)-[:DEPENDS_ON*]->(dep)
-  WITH j, count(distinct dep) AS deps
-  ORDER BY deps desc
-  RETURN j.name, deps;
-```
 
 ---
 
-### **3. Critical Path with Pure Cypher (15 min)**
+### 3. Calcular la ruta crítica usando solo Cypher (12 min)
 
-* Longest dependency chain:
+* Definir qué es la **ruta crítica**: la secuencia más larga (en duración) desde un trabajo inicial hasta uno final.
+
+* Usar un punto de partida representativo (por ejemplo, `SandyBrownSeatland`) para calcular la ruta más costosa:
 
   ```cypher
   MATCH path=(start:Job {name: "SandyBrownSeatland"})-[:DEPENDS_ON*]->(end:Job)
   WITH path,
-       reduce(total=0, n IN nodes(path) | total + n.duration_avg) AS duration_avg
-  ORDER BY duration_avg DESC LIMIT 1
-  RETURN path AS criticalPath, duration_avg;
-
-  RETURN [n IN nodes(path) | n.name] AS criticalPath, duration_avg;
+       reduce(total = 0, n IN nodes(path) | total + coalesce(n.duration_avg, 0)) AS duracion
+  RETURN [n IN nodes(path) | n.name] AS trabajos, duracion
+  ORDER BY duracion DESC
+  LIMIT 1;
   ```
 
-👉 Variation: run again after changing one job’s duration. How does the path change?
+  > Suma la duración promedio guardada en cada nodo de la ruta y devuelve la secuencia más larga encontrada.
+
+* **Variación para practicar:** cambiar la duración de un trabajo y volver a ejecutar la consulta para ver cómo cambia la ruta crítica.
 
 ---
 
-### **4. Detecting Cycles (5 min)**
+### 4. Detectar ciclos en el grafo (6 min)
 
-* Show why cycles = bad for scheduling:
+* Explicar por qué un ciclo nos impide planificar (un trabajo terminaría dependiendo de sí mismo) y cómo localizarlo:
 
-```cypher
-MATCH path=(j:Job)-[:DEPENDS_ON*]->(j)
-RETURN path LIMIT 1
-```
-
-👉 Insert a circular dependency (`OrangeRedSufferborough -> SandyBrownSeatland`) and detect it.
-
-```cypher
-MATCH (a:Job {name: "OrangeRedSufferborough"}), (b:Job {name: "SandyBrownSeatland"})
-CREATE (a)-[:DEPENDS_ON]->(b)
-```
-
-redo the cycle cypher
-
-```cypher
-MATCH (a:Job {name: "OrangeRedSufferborough"})-[r:DEPENDS_ON]->(b:Job {name: "SandyBrownSeatland"})
-DELETE r
-```
-
----
-
-### **5. Hands-On Challenges (10 min)**
-
-Give 2–3 small tasks for practice:
-
-1. Which jobs can start right away?
-2. Cuánto tardamos en que se ejecute todo, si podemos paralelizar indefinidamente?
-(max del camino crítico)
-
- ```cypher
-
-  MATCH path=(start:Job )-[:DEPENDS_ON*]->(end:Job)
-    WITH path,
-        reduce(total=0, n IN nodes(path) | total + n.duration_avg) AS duration_avg
-    ORDER BY duration_avg DESC LIMIT 1
-    RETURN path AS criticalPath, duration_avg;
-
+  ```cypher
+  MATCH path=(j:Job)-[:DEPENDS_ON*]->(j)
+  RETURN path
+  LIMIT 1;
   ```
 
-JOBS criticos
+  > Si esta consulta devuelve resultados, hay al menos un ciclo problemático.
 
-cual es el job crítico (con ejecución completa) más lento?
-
-MATCH path=(start:Job )-[:DEPENDS_ON*]->(end:Job)
-WHERE start.key = TRUE
-WITH path,
-    reduce(total=0, n IN nodes(path) | total + n.duration_avg) AS duration_avg
-ORDER BY duration_avg DESC LIMIT 1
-RETURN path AS criticalPath, duration_avg;
-
-Tenemos un problema con un job, a qué criticos afecta?
-
-```cypher
-MATCH path=(start:Job )-[:DEPENDS_ON*]->(affected:Job)
-WHERE start.key = TRUE and affected.name = "MediumVioletRedOfffort"
-RETURN path
-```
-
-3. Add a new job `E` depending on `C`, and recompute the critical path.
-
-* Shortest (pensar per que serveix aqui?)
-
-```cypher
-MATCH p = SHORTEST 1 (wos:Job)-[]-+(bmv:Job)
-WHERE wos.name = "WhiteSmokeYourselfburgh" AND bmv.name = "LightCoralDeepport"
-RETURN p, length(p) AS result
-```
-
-MATCH p = SHORTEST 1 (wos:Job)-[]->+(bmv:Job)
-WHERE wos.name = "WhiteSmokeYourselfburgh" AND bmv.name = "LightCoralDeepport"
-RETURN p, length(p) AS result
-
-* shortest path con duraciones
-
-```cypher
-MATCH path=(start:Job )-[:DEPENDS_ON*]->(end:Job)
-WHERE start.name = "WhiteSmokeYourselfburgh" AND end.name = "LightCoralDeepport"
-WITH path,
-        reduce(total=0, n IN nodes(path) | total + n.duration_avg) AS duration_avg
-ORDER BY duration_avg ASC LIMIT 1
-RETURN path, duration_avg, length(path) AS result
-```
-
-<!-- borrar tiempos -->
-```cypher
-MATCH (a :Job)
-REMOVE a.earliest_finish, a.earliest_start, a.latest_finish, a.latest_start, a.slack_time
-```
-
-```cypher
-// forward pass (correct direction)
-MATCH (j:Job)
-WITH j
-// all paths from roots (jobs with no outgoing DEPENDS_ON) to this job
-MATCH path=(root:Job)<-[:DEPENDS_ON*0..]-(j)
-WHERE NOT (root)-[:DEPENDS_ON]->() 
-WITH j,
-     max( reduce(t=0, n IN nodes(path)[0..-1] | t + coalesce(n.duration_avg,0)) ) AS earliest_start
-SET j.earliest_start = earliest_start,
-    j.earliest_finish = earliest_start + coalesce(j.duration_avg,0)
-RETURN j.name, j.earliest_start, j.earliest_finish
-ORDER BY j.earliest_start
-
-
-// get total project duration
-MATCH (end:Job)
-WHERE end.key = TRUE // no one depends on it
-RETURN max(end.earliest_finish) AS project_duration
-
-
-// backward pass (correct direction)
-
-MATCH (j:Job)
-WITH j
-// all paths from j forward to any critical job
-MATCH path=(j)<-[:DEPENDS_ON*0..]-(end:Job)
-WHERE end.key = TRUE // end job
-WITH j,
-     min( end.earliest_finish - reduce(t=0, n IN tail(nodes(path)) | t + coalesce(n.duration_avg,0)) ) AS latest_finish
-SET j.latest_finish = latest_finish,
-    j.latest_start  = latest_finish - coalesce(j.duration_avg,0)
-RETURN j.name, j.latest_start, j.latest_finish
-ORDER BY j.latest_start
-
-
-
-```
-
-job afectado = MediumVioletRedOfffort
+* **Ejercicio guiado:** crear una dependencia circular de forma controlada (por ejemplo, de `OrangeRedSufferborough` hacia `SandyBrownSeatland`), ejecutar de nuevo la detección para confirmarla y, finalmente, eliminar la relación para dejar el grafo consistente.
 
 ---
 
-### **6. Wrap-Up (5 min)**
+### 5. Retos prácticos en grupos (10 min)
 
-* Recap: querying dependencies, start jobs, critical path, cycles.
-* Highlight real-world analogies: build pipelines, ETL workflows, manufacturing tasks.
-* Encourage participants to experiment further with Cypher.
+1. **Trabajos prioritarios:** listar todos los trabajos que se pueden lanzar de inmediato y validar el resultado con `count(*)`.
+
+2. **Duración total del proyecto:** obtener el tiempo del camino crítico más largo (pueden reutilizar la consulta de la sección 3 pero sin fijar el nodo inicial).
+
+   ```cypher
+   MATCH path=(start:Job)-[:DEPENDS_ON*]->(end:Job)
+   WITH path,
+        reduce(total = 0, n IN nodes(path) | total + coalesce(n.duration_avg, 0)) AS duracion
+   RETURN [n IN nodes(path) | n.name] AS trabajos, duracion
+   ORDER BY duracion DESC
+   LIMIT 1;
+   ```
+
+3. **Impacto de un fallo:** encontrar todas las rutas críticas que pasan por `MediumVioletRedOfffort`.
+
+   ```cypher
+   MATCH path=(inicio:Job)-[:DEPENDS_ON*]->(fin:Job)
+   WHERE inicio.critical = TRUE AND "MediumVioletRedOfffort" IN [n IN nodes(path) | n.name]
+   RETURN path;
+   ```
+
+* **Extensión opcional:** calcular tiempos tempranos y tardíos usando consultas de *forward pass* y *backward pass* si el grupo quiere profundizar en márgenes y holguras.
 
 ---
 
-✅ Deliverables: Dataset + “cheat sheet” of Cypher queries for them to keep.
+### 6. Cierre (5 min)
 
----
-
-Would you like me to **prepare a ready-to-use worksheet** (like a PDF or Markdown with exercises + solutions) so participants can follow along step by step?
+* Repasar las ideas clave: detección de dependencias, identificación de trabajos iniciales y finales, cálculo de rutas críticas y búsqueda de ciclos.
+* Conectar lo aprendido con procesos del mundo real (pipelines de CI/CD, cadenas de suministro, ETL, etc.).
+* Entregar como material de apoyo el dataset que usamos y una hoja resumen con las consultas en **Cypher** que practicamos.
