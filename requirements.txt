@@ -48,5 +48,5 @@ bqplot
 polars>=1.33
 networkx[default]>=3,<4
 scikit-learn>=1.7
-numpy>=2.3
+numpy>=2.2
 pydot>=4
