@@ -1,9 +1,10 @@
+# 📘 Neo4j: Grafo de dependencias
 
-# 📘 Job Dependency Graph in Neo4j
-
-## **0. Intro (5 min)**
+## **0. Intro**
 
 Comentar el PPT
+
+Entrar a arrows.app
 
 Entrar a Neo4j.
 
@@ -21,6 +22,19 @@ Un **grafo** está compuesto por:
 Ejemplo:
 `(A)-[:DEPENDS_ON]->(B)` significa que **A depende de B**.
 
+```mermaid
+erDiagram
+  Job {
+    string  name PK
+    float   duration_avg
+    boolean key
+    float   earliest_start
+    float   earliest_finish
+    float   latest_start
+    float   latest_finish
+  }
+```
+
 Cláusulas. Explicar (slides)
 
 * MATCH
@@ -32,6 +46,20 @@ Cláusulas. Explicar (slides)
 * WITH
   * La manera de hacer subqueries
   * Distinct
+
+```mermaid
+graph LR
+  subgraph Pipeline
+    A[SteelBlue<br/>AquaEvershire] --> B[SlateBlue<br/>VioletEntireborough]
+    B --> C[Teal<br/>SandyBrownSeatland]
+    A --> D[SeaGreen<br/>LightCoralDeepport]
+    D --> C
+  end
+
+  %% Opcional: colorear nodos "key"
+  classDef key fill:#ffe4a3,stroke:#e3a500,stroke-width:2px;
+  class B,C key;
+```
 
 ---
 
@@ -88,7 +116,7 @@ RETURN DISTINCT j;
 
 ---
 
-## **3. Identificando trabajos iniciales y finales**
+## **2. Identificando trabajos iniciales y finales**
 
 ### 🟢 Jobs sin dependencias (pueden arrancar primero)
 
@@ -144,7 +172,7 @@ RETURN j.name, deps;
 
 ---
 
-## **4. Camino crítico con Cypher**
+## **3. Camino crítico con Cypher**
 
 El **camino crítico** es la secuencia de tareas que determina la duración total del proyecto.
 
@@ -154,6 +182,21 @@ WITH path,
      reduce(total=0, n IN nodes(path) | total + n.duration_avg) AS duration_avg
 ORDER BY duration_avg DESC LIMIT 1
 RETURN [n IN nodes(path) | n.name] AS criticalPath, duration_avg;
+```
+
+```mermaid
+graph LR
+  A[AquaEvershire] --> B[VioletEntireborough]
+  B --> C[SandyBrownSeatland]
+  A --> D[LightCoralDeepport]
+  D --> C
+
+  %% Estilo de camino crítico A->B->C
+  classDef critical fill:#ffd6d6,stroke:#e23,stroke-width:2px;
+  class A,B,C critical;
+
+  linkStyle 0 stroke:#e23,stroke-width:3px;
+  linkStyle 1 stroke:#e23,stroke-width:3px;
 ```
 
 🧠 **Concepto clave:**
@@ -170,9 +213,22 @@ SET j.duration_avg = 999; // 39
 
 ---
 
-## **5. Detectando ciclos**
+## **4. Detectando ciclos**
 
 Los ciclos son problemáticos: impiden determinar un orden de ejecución.
+
+```mermaid
+graph LR
+  O[OrangeRedSufferborough] --> S[SandyBrownSeatland]
+  S --> X[GhostWhiteTown]
+  X --> O
+
+  classDef cycle fill:#fff1f1,stroke:#f33,stroke-width:2px,stroke-dasharray: 4 2;
+  class O,S,X cycle;
+
+  %% Nota visual
+  %% click events no hacen nada en markdown normal, pero sirven si embebes en páginas con handlers
+```
 
 ```cypher
 MATCH path=(j:Job)-[:DEPENDS_ON*]->(j)
@@ -195,7 +251,7 @@ DELETE r;
 
 ---
 
-## **6. Desafíos prácticos (10 min)**
+## **5. Desafíos prácticos (10 min)**
 
 1. **¿Qué jobs pueden empezar ya?**
 
@@ -225,7 +281,7 @@ RETURN j.name, total;
 ```
 
 4. **Extra (conceptual):**
-Buscar el *shortest path* tiene poco sentido aquí, pero imagina que las relaciones representan distancias o tiempos de viaje.
+   Buscar el *shortest path* tiene poco sentido aquí, pero imagina que las relaciones representan distancias o tiempos de viaje.
 
 ```cypher
 MATCH p = SHORTEST 1 (a:Job)-[]-+(b:Job)
@@ -250,7 +306,7 @@ ORDER BY duration_avg ASC LIMIT 1
 RETURN path, duration_avg, length(path) AS result
 ```
 
-## **7. Key Jobs y tiempos de ejecución**
+## **6. Key Jobs y tiempos de ejecución**
 
 ## Borrar tiempos
 
@@ -346,7 +402,6 @@ RETURN path
 Ejecutar lo siguiente para calcular *earliest/latest*, *start/finish*:
 
 ```cypher
-
 // forward pass
 MATCH (j:Job)
 WITH j
@@ -402,7 +457,7 @@ return count(1) as critical_jobs
 
 ---
 
-## **6. Wrap-Up (5 min)**
+## **7. Final**
 
 ✅ **Resumen:**
 
